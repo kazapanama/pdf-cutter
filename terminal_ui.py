@@ -1,8 +1,9 @@
 from textual.app import App, ComposeResult
-from textual.widgets import Tree, Footer, Header, Label
+from textual.widgets import Tree, Footer, Header, Label, TextArea, Button, Static
 from textual.screen import Screen
 from textual.binding import Binding
-from textual.containers import Container
+from textual.containers import Container, Vertical, Horizontal
+import re
 
 class ChapterTree(Tree):
     BINDINGS = [
@@ -143,4 +144,145 @@ class PDFSplitterApp(App):
 
 def run_tui(outline_data, pdf_title):
     app = PDFSplitterApp(outline_data, pdf_title)
+    return app.run()
+
+
+class ManualRangeApp(App):
+    """TUI for manually entering page ranges to split a PDF."""
+
+    CSS = """
+    Screen {
+        layout: vertical;
+    }
+    Header {
+        dock: top;
+    }
+    Footer {
+        dock: bottom;
+    }
+    #info {
+        padding: 1;
+        margin: 1;
+        background: $surface;
+    }
+    #help-text {
+        padding: 1;
+        margin: 0 1;
+        color: $text-muted;
+    }
+    TextArea {
+        height: 15;
+        margin: 1;
+        border: solid green;
+    }
+    #buttons {
+        height: 3;
+        margin: 1;
+        align: center middle;
+    }
+    Button {
+        margin: 0 1;
+    }
+    #error {
+        padding: 1;
+        margin: 0 1;
+        color: red;
+    }
+    """
+
+    BINDINGS = [
+        Binding("ctrl+s", "confirm", "Confirm"),
+        Binding("q", "quit", "Quit"),
+    ]
+
+    def __init__(self, pdf_title: str, total_pages: int):
+        super().__init__()
+        self.pdf_title = pdf_title
+        self.total_pages = total_pages
+        self.chapters = []
+
+    def compose(self) -> ComposeResult:
+        yield Header()
+        yield Static(f"Manual split for: [bold]{self.pdf_title}[/] ({self.total_pages} pages)", id="info")
+        yield Static(
+            "Enter page ranges, one per line. Format: [bold]start-end[/] or [bold]start-end:Title[/]\n"
+            "Examples:\n"
+            "  1-50\n"
+            "  51-100:Chapter 2\n"
+            "  101-150:Results and Discussion",
+            id="help-text"
+        )
+        yield TextArea(id="ranges-input")
+        yield Static("", id="error")
+        yield Horizontal(
+            Button("Confirm (Ctrl+S)", id="confirm", variant="primary"),
+            Button("Quit (Q)", id="quit", variant="error"),
+            id="buttons"
+        )
+        yield Footer()
+
+    def on_mount(self):
+        self.query_one("#ranges-input", TextArea).focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "confirm":
+            self.action_confirm()
+        elif event.button.id == "quit":
+            self.exit([])
+
+    def action_confirm(self):
+        text_area = self.query_one("#ranges-input", TextArea)
+        error_label = self.query_one("#error", Static)
+
+        text = text_area.text.strip()
+        if not text:
+            error_label.update("[bold red]Error: Please enter at least one range[/]")
+            return
+
+        chapters, error = self.parse_ranges(text)
+        if error:
+            error_label.update(f"[bold red]Error: {error}[/]")
+            return
+
+        self.chapters = chapters
+        self.exit(chapters)
+
+    def parse_ranges(self, text: str):
+        """Parse range input text into chapter list.
+
+        Returns: (chapters, error_message)
+        """
+        chapters = []
+        lines = [line.strip() for line in text.strip().split('\n') if line.strip()]
+
+        for i, line in enumerate(lines, 1):
+            # Match pattern: start-end or start-end:title
+            match = re.match(r'^(\d+)\s*-\s*(\d+)(?:\s*:\s*(.+))?$', line)
+            if not match:
+                return None, f"Line {i}: Invalid format '{line}'. Use 'start-end' or 'start-end:title'"
+
+            start = int(match.group(1))
+            end = int(match.group(2))
+            title = match.group(3) if match.group(3) else f"Part {i}"
+
+            # Validate range
+            if start < 1:
+                return None, f"Line {i}: Start page must be at least 1"
+            if end > self.total_pages:
+                return None, f"Line {i}: End page {end} exceeds total pages ({self.total_pages})"
+            if start > end:
+                return None, f"Line {i}: Start page {start} cannot be greater than end page {end}"
+
+            chapters.append({
+                'title': title.strip(),
+                'start_page': start,
+                'end_page': end
+            })
+
+        return chapters, None
+
+
+def run_manual_range_tui(pdf_title: str, total_pages: int):
+    """Run the manual range input TUI."""
+    app = ManualRangeApp(pdf_title, total_pages)
     return app.run()
