@@ -6,6 +6,12 @@ from pdf_processor import extract_chapters, get_nested_outline, calculate_end_pa
 
 
 def main():
+    # Неінтерактивний режим: --toc / --extract (див. cli.py)
+    import cli
+    if cli.wanted(sys.argv[1:]):
+        cli.run(sys.argv[1:])
+        return
+
     # Parse arguments
     manual_mode = '--manual' in sys.argv or '-m' in sys.argv
     args = [arg for arg in sys.argv[1:] if arg not in ('--manual', '-m')]
